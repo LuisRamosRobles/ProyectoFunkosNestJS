@@ -3,9 +3,12 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
   Delete,
+  Logger,
+  HttpCode,
+  Put,
+  ParseUUIDPipe,
 } from '@nestjs/common'
 import { CategoriasService } from './categorias.service'
 import { CreateCategoriaDto } from './dto/create-categoria.dto'
@@ -13,33 +16,41 @@ import { UpdateCategoriaDto } from './dto/update-categoria.dto'
 
 @Controller('categorias')
 export class CategoriasController {
+  private readonly logger: Logger = new Logger(CategoriasController.name)
   constructor(private readonly categoriasService: CategoriasService) {}
 
-  @Post()
-  create(@Body() createCategoriaDto: CreateCategoriaDto) {
-    return this.categoriasService.create(createCategoriaDto)
-  }
-
   @Get()
-  findAll() {
-    return this.categoriasService.findAll()
+  async findAll() {
+    this.logger.log('Obteniendo todas las categorias.')
+    return await this.categoriasService.findAll()
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.categoriasService.findOne(+id)
+  async findOne(@Param('id') id: string) {
+    this.logger.log(`Obteniendo la categoria con ID: ${id}`)
+    return await this.categoriasService.findOne(id)
   }
 
-  @Patch(':id')
-  update(
-    @Param('id') id: string,
+  @Post()
+  @HttpCode(201)
+  async create(@Body() createCategoriaDto: CreateCategoriaDto) {
+    this.logger.log('Creando categoria.')
+    return await this.categoriasService.create(createCategoriaDto)
+  }
+
+  @Put(':id')
+  async update(
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateCategoriaDto: UpdateCategoriaDto,
   ) {
-    return this.categoriasService.update(+id, updateCategoriaDto)
+    this.logger.log(`Actualizando categoria con ID: ${id}`)
+    return await this.categoriasService.update(id, updateCategoriaDto)
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.categoriasService.remove(+id)
+  @HttpCode(204)
+  async remove(@Param('id', ParseUUIDPipe) id: string) {
+    this.logger.log(`Borrando categoria con ID: ${id}`)
+    return await this.categoriasService.remove(id)
   }
 }

@@ -11,5 +11,5 @@ export class CreateFunkoDto {
   @Length(5, 50, {
     message: 'El nombre de la categoria debe tener entre 5 y 50 caracteres.',
   })
-  categoria: string
+  categoria: string //Nombre de la categoria no confundir con el id
 }

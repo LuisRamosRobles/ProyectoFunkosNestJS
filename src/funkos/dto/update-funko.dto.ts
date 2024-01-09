@@ -3,8 +3,6 @@ import { CreateFunkoDto } from './create-funko.dto'
 import { IsNotEmpty, IsString, Length } from 'class-validator'
 
 export class UpdateFunkoDto extends PartialType(CreateFunkoDto) {
-  id: number
-
   @IsString()
   @IsNotEmpty({ message: 'El nombre no puede estar vacio.' })
   @Length(5, 50, {
@@ -17,5 +15,5 @@ export class UpdateFunkoDto extends PartialType(CreateFunkoDto) {
   @Length(5, 50, {
     message: 'El nombre de la categoria debe tener entre 5 y 50 caracteres.',
   })
-  categoria: string
+  categoria: string //Nombre de la categoria no confundir con el id
 }
