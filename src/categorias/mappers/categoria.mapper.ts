@@ -6,11 +6,9 @@ import { UpdateCategoriaDto } from '../dto/update-categoria.dto'
 
 @Injectable()
 export class CategoriaMapper {
-  mapCreateDtotoEntity(createCategoriaDto: CreateCategoriaDto): Categoria {
+  mapCreateDtotoEntity(
+    createCategoriaDto: CreateCategoriaDto | UpdateCategoriaDto,
+  ): Categoria {
     return plainToClass(Categoria, createCategoriaDto)
-  }
-
-  mapUpdateDtotoEntity(updateCategoriaDto: UpdateCategoriaDto): Categoria {
-    return plainToClass(Categoria, updateCategoriaDto)
   }
 }

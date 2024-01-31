@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, Length } from 'class-validator'
+import { IsNotEmpty, IsOptional, IsString, Length } from 'class-validator'
 
 export class CreateFunkoDto {
   @IsString({ message: 'El nombre no puede ser un número.' })
@@ -12,4 +12,8 @@ export class CreateFunkoDto {
     message: 'El nombre de la categoria debe tener entre 5 y 50 caracteres.',
   })
   categoria: string //Nombre de la categoria no confundir con el id
+
+  @IsOptional()
+  @IsString()
+  imagen?: string
 }

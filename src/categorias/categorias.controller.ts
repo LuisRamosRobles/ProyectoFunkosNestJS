@@ -9,20 +9,26 @@ import {
   HttpCode,
   Put,
   ParseUUIDPipe,
+  UseInterceptors,
 } from '@nestjs/common'
 import { CategoriasService } from './categorias.service'
 import { CreateCategoriaDto } from './dto/create-categoria.dto'
 import { UpdateCategoriaDto } from './dto/update-categoria.dto'
+import { CacheInterceptor, CacheKey, CacheTTL } from '@nestjs/cache-manager'
+import { Paginate, PaginateQuery } from 'nestjs-paginate'
 
 @Controller('categorias')
+@UseInterceptors(CacheInterceptor) //aquí se aplica el interceptor de la caché
 export class CategoriasController {
   private readonly logger: Logger = new Logger(CategoriasController.name)
   constructor(private readonly categoriasService: CategoriasService) {}
 
   @Get()
-  async findAll() {
+  @CacheKey('all_categorias')
+  @CacheTTL(30)
+  async findAll(@Paginate() query: PaginateQuery) {
     this.logger.log('Obteniendo todas las categorias.')
-    return await this.categoriasService.findAll()
+    return await this.categoriasService.findAll(query)
   }
 
   @Get(':id')

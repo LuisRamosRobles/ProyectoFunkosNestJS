@@ -4,18 +4,16 @@ import {
   Entity,
   OneToMany,
   PrimaryColumn,
-  Unique,
   UpdateDateColumn,
 } from 'typeorm'
 import { Funko } from '../../funkos/entities/funko.entity'
 
 @Entity({ name: 'categoria' }) //Nombre de la tabla, recuerda que es case sensitive al poner el nombre
-//@Unique(['nombre']) //Para que cada categoria tenga un nombre unico, es decir que no se repitan los nombres
 export class Categoria {
   @PrimaryColumn({ type: 'uuid' }) // El decorador indica que el id será autoincremental y lo pondra la base de datos
   id: string
 
-  @Column({ type: 'varchar', length: 255 })
+  @Column({ type: 'varchar', length: 255, unique: true })
   nombre: string
 
   @CreateDateColumn({

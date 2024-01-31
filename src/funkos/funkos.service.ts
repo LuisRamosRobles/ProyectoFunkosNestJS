@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -11,6 +12,21 @@ import { FunkosMapper } from './mappers/funkos.mapper/funko.mapper'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { Categoria } from '../categorias/entities/categoria.entity'
+import { ResponseFunkoDto } from './dto/response-funko.dto'
+import { StorageService } from '../storage/storage.service'
+import * as process from 'process'
+import { Request } from 'express'
+import { TipoWebSocket, WsocketModel } from '../websockets/models/wsocket.model'
+import { FunkosWebsocketGateway } from '../websockets/funkos-websocket.gateway'
+import { Cache } from 'cache-manager'
+import { CACHE_MANAGER } from '@nestjs/cache-manager'
+import { hash } from 'typeorm/util/StringUtils'
+import {
+  FilterOperator,
+  FilterSuffix,
+  paginate,
+  PaginateQuery,
+} from 'nestjs-paginate'
 
 @Injectable()
 export class FunkosService {
@@ -22,54 +38,159 @@ export class FunkosService {
     @InjectRepository(Categoria)
     private readonly categoriaRepository: Repository<Categoria>,
     private readonly funkoMapper: FunkosMapper,
+    private readonly storageService: StorageService,
+    private readonly funkosWebsocketGateway: FunkosWebsocketGateway,
+    @Inject(CACHE_MANAGER) private managerCache: Cache,
   ) {}
 
-  async findAll(): Promise<Funko[]> {
+  async findAll(query: PaginateQuery) {
     this.logger.log('Obteniendo todos los funkos.')
-    return this.funkoRepository.find()
+    //check cache
+    const cache = await this.managerCache.get(
+      `all_funkos_page_${hash(JSON.stringify(query))}`,
+    )
+    if (cache) {
+      this.logger.log('Cache hit')
+      return cache
+    }
+
+    //a continuación esta el queryBuilder que es el facilita hacer
+    //el leftJoinAndSelect con la categoria
+    const funkos = await this.funkoRepository
+      .createQueryBuilder('funko')
+      .leftJoinAndSelect('funko.categoria', 'categoria')
+
+    const paginacion = await paginate(query, funkos, {
+      sortableColumns: [
+        'nombre',
+        'categoria',
+        'descripcion',
+        'precio',
+        'stock',
+      ],
+      defaultSortBy: [['id', 'ASC']],
+      searchableColumns: [
+        'nombre',
+        'categoria',
+        'descripcion',
+        'precio',
+        'stock',
+      ],
+      filterableColumns: {
+        nombre: [FilterOperator.EQ, FilterSuffix.NOT],
+        categoria: [],
+        descripcion: [],
+        precio: true,
+        stock: true,
+      },
+    })
+
+    // a continuación mapeamos los elementos de la página para devolverlos en el
+    // formato que queramos con la categoria
+
+    const res = {
+      data: (paginacion.data ?? []).map((funko) =>
+        this.funkoMapper.mapResponseDto(funko),
+      ),
+      meta: paginacion.meta,
+      links: paginacion.links,
+    }
+
+    //seguidamente se guarda en cache
+    await this.managerCache.set(
+      `all_funkos_page_${hash(JSON.stringify(query))}`,
+      res,
+      60,
+    )
+
+    return res
   }
 
-  async findOne(id: number) {
+  async findOne(id: number): Promise<ResponseFunkoDto> {
     this.logger.log(`Obteniendo el funko con ID: ${id}`)
-    const found = await this.funkoRepository.findOneBy({ id })
 
-    if (!found) {
+    //Cache
+    const cache: ResponseFunkoDto = await this.managerCache.get(`funko_${id}`)
+
+    if (cache) {
+      console.log('Cache hit')
+      this.logger.log('Cache hit')
+      return cache
+    }
+    //no se puede usar .findOneBy si se quiere devolver el nombre de la categoria
+    const foundFunko = await this.funkoRepository
+      .createQueryBuilder('funko')
+      .leftJoinAndSelect('funko.categoria', 'categoria')
+      .where('funko.id = :id', { id })
+      .getOne()
+    if (!foundFunko) {
       throw new NotFoundException(
         `El Funko con ID (${id}) no ha sido encontrado.`,
       )
     }
 
-    return found
+    const res = this.funkoMapper.mapResponseDto(foundFunko)
+    await this.managerCache.set(`funko_${id}`, res, 60)
+    return res
   }
-  async create(createFunkoDto: CreateFunkoDto): Promise<Funko> {
+  async create(createFunkoDto: CreateFunkoDto): Promise<ResponseFunkoDto> {
     this.logger.log('Creando un nuevo Funko.')
     const categoria = await this.existsCategoria(createFunkoDto.categoria)
-    const nuevoFunko = this.funkoMapper.mapCreateDtotoEntity(
+    const creandoFunko = this.funkoMapper.mapCreateDtotoEntity(
       createFunkoDto,
       categoria,
     )
-    return this.funkoRepository.save(nuevoFunko)
+    const nuevoFunko = await this.funkoRepository.save(creandoFunko)
+    const dto = this.funkoMapper.mapResponseDto(nuevoFunko)
+    this.onChange(TipoWebSocket.CREATE, dto)
+    //la siguiente linea sirve para invalidar la cache de funkos_all cuando se crea
+    //un funko nuevo
+    await this.invalidateCacheKey('all_funkos')
+
+    return dto
   }
-  async update(id: number, updateFunkoDto: UpdateFunkoDto) {
+  async update(
+    id: number,
+    updateFunkoDto: UpdateFunkoDto,
+  ): Promise<ResponseFunkoDto> {
     this.logger.log(`Actualizando el funko con ID: ${id}`)
     const foundFunko = await this.existsFunko(id)
     let categoria: Categoria
     if (updateFunkoDto.categoria) {
       categoria = await this.existsCategoria(updateFunkoDto.categoria)
     }
-    const updateFunko = this.funkoRepository.save({
+    const updateFunko = await this.funkoRepository.save({
       ...foundFunko,
       ...updateFunkoDto,
       categoria: categoria ? categoria : foundFunko.categoria,
     })
+    const dto = this.funkoMapper.mapResponseDto(updateFunko)
+    this.onChange(TipoWebSocket.UPDATE, dto)
 
-    return updateFunko
+    //las siguientes lineas invalidan la cache de un funko específico
+    //y funko_all cuando se actualiza un funko
+    await this.invalidateCacheKey(`funko_${id}`)
+    await this.invalidateCacheKey('all_funkos')
+
+    return dto
   }
 
   async remove(id: number) {
     this.logger.log(`Eliminando el funko con ID: ${id}`)
-    const foundIndex = await this.existsFunko(id)
-    return this.funkoRepository.remove(foundIndex)
+    const funkoAEliminar = await this.existsFunko(id)
+    const funkoEliminado = await this.funkoRepository.remove(funkoAEliminar)
+    if (funkoAEliminar.imagen !== Funko.IMAGENPORDEFECTO) {
+      this.logger.log(`Eliminando imagen ${funkoAEliminar.imagen}`)
+      this.storageService.removeFile(funkoAEliminar.imagen)
+    }
+
+    const dto = this.funkoMapper.mapResponseDto(funkoEliminado)
+    this.onChange(TipoWebSocket.DELETE, dto)
+
+    await this.invalidateCacheKey(`funko_${id}`)
+    await this.invalidateCacheKey('all_funkos')
+
+    return dto
   }
 
   public async existsCategoria(nombreCategoria: string): Promise<Categoria> {
@@ -92,13 +213,81 @@ export class FunkosService {
   }
 
   public async existsFunko(id: number): Promise<Funko> {
-    const product = await this.funkoRepository.findOneBy({ id })
+    const funko = await this.funkoRepository.findOneBy({ id })
 
-    if (!product) {
+    if (!funko) {
       this.logger.log(`El Funko con el ID(${id}) no existe.`)
       throw new NotFoundException(`El Funko con el ID(${id}) no existe.`)
     }
 
-    return product
+    return funko
+  }
+  //mirar los import y este metodo
+  public async updateImage(
+    id: number,
+    archivo: Express.Multer.File,
+    req: Request,
+    withUrl: boolean = true,
+  ) {
+    this.logger.log(`Update image funko by id: ${id}`)
+    const funkoToUpdate = await this.existsFunko(id)
+    // Borramos su imagen si es distinta a la imagen por defecto
+    if (funkoToUpdate.imagen !== Funko.IMAGENPORDEFECTO) {
+      this.logger.log(`Borrando imagen ${funkoToUpdate.imagen}`)
+      let imagePath = funkoToUpdate.imagen
+      if (withUrl) {
+        imagePath = this.storageService.getFileName(funkoToUpdate.imagen)
+      }
+      try {
+        this.storageService.removeFile(imagePath)
+      } catch (error) {
+        this.logger.error(error)
+      }
+    }
+
+    if (!archivo) {
+      throw new BadRequestException('Archivo no encontrado.')
+    }
+
+    let filePath: string
+
+    if (withUrl) {
+      this.logger.log(`Generando url para ${archivo.filename}`)
+      // Construimos la url del fichero, que será la url de la API + el nombre del fichero
+      const apiVersion = process.env.API_VERSION
+        ? `/${process.env.API_VERSION}`
+        : ''
+      filePath = `${req.protocol}://${req.get('host')}${apiVersion}/storage/${
+        archivo.filename
+      }`
+    } else {
+      filePath = archivo.filename
+    }
+
+    funkoToUpdate.imagen = filePath
+    const funkoActualizado = await this.funkoRepository.save(funkoToUpdate)
+    const dto = this.funkoMapper.mapResponseDto(funkoActualizado)
+    this.onChange(TipoWebSocket.UPDATE, dto)
+    await this.invalidateCacheKey(`funko_${id}`)
+    await this.invalidateCacheKey('all_funkos')
+    return dto
+  }
+
+  private onChange(tipo: TipoWebSocket, data: ResponseFunkoDto) {
+    const notificacion = new WsocketModel<ResponseFunkoDto>(
+      'FUNKOS',
+      tipo,
+      data,
+      new Date(),
+    )
+
+    this.funkosWebsocketGateway.sendMessage(notificacion)
+  }
+
+  async invalidateCacheKey(keyPattern: string): Promise<void> {
+    const cacheKeys = await this.managerCache.store.keys()
+    const keysToDelete = cacheKeys.filter((key) => key.startsWith(keyPattern))
+    const promises = keysToDelete.map((key) => this.managerCache.del(key))
+    await Promise.all(promises)
   }
 }

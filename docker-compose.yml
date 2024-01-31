@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+#PostgreSQL
+  postgres:
+    image: postgres:12-alpine
+    container_name: funko-db_postgresql
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DATABASE}
+    ports:
+      - ${POSTGRES_PORT}:5432
+    volumes:
+      - ./data/funkodb.sql:/docker-entrypoint-initdb.d/funkodb.sql
+    networks:
+      - funkosNetwork
+
+  #Adminer
+  # Quitar en despliegue final
+  adminer-postgres:
+    image: adminer
+    container_name: adminer-postgres-funkodb
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - 8080:8080
+    depends_on:
+      - postgres
+    networks:
+      - funkosNetwork
+
+  #Mongo
+  mongo:
+    container_name: funko-db_mongo
+    image: mongo:5.0
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${DATABASE_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${DATABASE_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE}
+    ports:
+      - ${MONGO_PORT}:27017
+    volumes:
+      - ./data/funkodb.js:/docker-entrypoint-initdb.d/funkodb.js
+    networks:
+      - funkosNetwork
+
+  #Mongo Express
+  mongo-express:
+    container_name: mongo-express-funkodb
+    image: mongo-express
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - 8081:8081
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${DATABASE_USER}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${DATABASE_PASSWORD}
+      ME_CONFIG_MONGODB_SERVER: mongo-db
+    depends_on:
+      - mongo
+    networks:
+      - funkosNetwork
+
+networks:
+  funkosNetwork:
+    driver: bridge
